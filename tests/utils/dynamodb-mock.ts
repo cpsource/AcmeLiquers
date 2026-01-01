@@ -15,9 +15,9 @@ export function resetDynamoMocks(): void {
 /**
  * Mock successful GetCommand
  */
-export function mockGetItem(item: Record<string, unknown> | null): void {
+export function mockGetItem(item: object | null): void {
   ddbMock.on(GetCommand).resolves({
-    Item: item ?? undefined,
+    Item: item as Record<string, unknown> ?? undefined,
   });
 }
 
@@ -26,10 +26,10 @@ export function mockGetItem(item: Record<string, unknown> | null): void {
  */
 export function mockGetItemForKey(
   key: Record<string, string>,
-  item: Record<string, unknown> | null
+  item: object | null
 ): void {
   ddbMock.on(GetCommand, { Key: key }).resolves({
-    Item: item ?? undefined,
+    Item: item as Record<string, unknown> ?? undefined,
   });
 }
 
@@ -52,9 +52,9 @@ export function mockPutItemConditionalFailure(): void {
 /**
  * Mock successful QueryCommand
  */
-export function mockQuery(items: Record<string, unknown>[], lastKey?: Record<string, unknown>): void {
+export function mockQuery(items: object[], lastKey?: Record<string, unknown>): void {
   ddbMock.on(QueryCommand).resolves({
-    Items: items,
+    Items: items as Record<string, unknown>[],
     LastEvaluatedKey: lastKey,
   });
 }

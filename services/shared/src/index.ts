@@ -7,6 +7,9 @@ export * from "./types/events";
 export * from "./dynamodb/client";
 export * from "./dynamodb/operations";
 
+// SQS utilities
+export * from "./sqs/client";
+
 // Utilities
 export * from "./utils/idempotency";
 export * from "./utils/validation";

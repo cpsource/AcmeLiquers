@@ -24,7 +24,7 @@ export const PaymentState = {
 
 export type PaymentState = (typeof PaymentState)[keyof typeof PaymentState];
 
-// Order item schema
+// Order item schema (full, with calculated total_price)
 export const OrderItemSchema = z.object({
   sku: z.string().min(1),
   name: z.string().min(1),
@@ -35,13 +35,22 @@ export const OrderItemSchema = z.object({
 
 export type OrderItem = z.infer<typeof OrderItemSchema>;
 
-// Create order request schema
+// Order item schema for create request (total_price calculated by handler)
+export const CreateOrderItemSchema = z.object({
+  sku: z.string().min(1),
+  name: z.string().min(1),
+  quantity: z.number().int().positive(),
+  unit_price: z.number().positive(),
+});
+
+export type CreateOrderItem = z.infer<typeof CreateOrderItemSchema>;
+
+// Create order request schema (idempotency_key comes from header)
 export const CreateOrderRequestSchema = z.object({
   customer_id: z.string().min(1),
   store_id: z.string().min(1),
   county_id: z.string().min(1),
-  items: z.array(OrderItemSchema).min(1),
-  idempotency_key: z.string().min(1),
+  items: z.array(CreateOrderItemSchema).min(1),
   shipping_address: z.object({
     street: z.string().min(1),
     city: z.string().min(1),

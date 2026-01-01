@@ -3,6 +3,7 @@ import {
   PutCommand,
   QueryCommand,
   UpdateCommand,
+  UpdateCommandInput,
   DeleteCommand,
   BatchWriteCommand,
 } from "@aws-sdk/lib-dynamodb";
@@ -55,7 +56,10 @@ export async function createOrder(
 
     return { created: true, order };
   } catch (error) {
-    if (error instanceof ConditionalCheckFailedException) {
+    if (
+      error instanceof ConditionalCheckFailedException ||
+      (error instanceof Error && error.name === "ConditionalCheckFailedException")
+    ) {
       // Order already exists, fetch and return it
       const existing = await getOrderByCustomer(
         order.customer_id,
@@ -243,7 +247,7 @@ export async function updateOrderStatus(
 
   try {
     // Update main orders table
-    const updateParams: Parameters<typeof UpdateCommand>[0] = {
+    const updateParams: UpdateCommandInput = {
       TableName: TableNames.ORDERS,
       Key: {
         customer_id: customerId,
@@ -285,7 +289,10 @@ export async function updateOrderStatus(
 
     return true;
   } catch (error) {
-    if (error instanceof ConditionalCheckFailedException) {
+    if (
+      error instanceof ConditionalCheckFailedException ||
+      (error instanceof Error && error.name === "ConditionalCheckFailedException")
+    ) {
       return false;
     }
     throw error;

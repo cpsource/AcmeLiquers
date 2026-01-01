@@ -35,6 +35,7 @@ export function mockSendMessageBatch(count: number = 1): void {
     Successful: Array.from({ length: count }, (_, i) => ({
       Id: `msg-${i}`,
       MessageId: `test-message-${i}`,
+      MD5OfMessageBody: 'test-md5',
     })),
     Failed: [],
   });
