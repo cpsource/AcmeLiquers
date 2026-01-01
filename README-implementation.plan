@@ -1,0 +1,383 @@
+# ACME Liquors - AWS Order System Implementation Plan
+
+## Overview
+
+This plan implements the full AWS architecture described in README.md for migrating ACME Liquors from an overloaded SQL order system to a DynamoDB-based solution.
+
+**Technology Stack:**
+- Infrastructure: AWS CDK (TypeScript)
+- Runtime: TypeScript/Node.js (Lambda)
+- Primary Database: Amazon DynamoDB
+- Queue: Amazon SQS
+- API: Amazon API Gateway
+
+---
+
+## Project Structure
+
+```
+/home/ubuntu/AcmeLiquers/
+├── README.md                          # Existing architecture doc
+├── README-implementation.plan         # This implementation plan
+├── package.json                       # Root package.json (npm workspaces)
+├── tsconfig.json                      # Root TypeScript config
+├── .gitignore
+├── cdk.json                           # CDK configuration
+│
+├── infrastructure/                    # AWS CDK infrastructure code
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── bin/
+│   │   └── app.ts                     # CDK app entry point
+│   └── lib/
+│       ├── stacks/
+│       │   ├── api-stack.ts           # API Gateway + WAF
+│       │   ├── database-stack.ts      # DynamoDB tables + GSIs
+│       │   ├── processing-stack.ts    # SQS + Lambda workers
+│       │   ├── events-stack.ts        # DynamoDB Streams + EventBridge
+│       │   ├── analytics-stack.ts     # Firehose + S3 + Athena
+│       │   └── migration-stack.ts     # DMS + dual-write infra
+│       └── constructs/
+│           ├── order-table.ts         # DynamoDB Orders table construct
+│           ├── order-api.ts           # API Gateway construct
+│           └── order-processor.ts     # SQS + Lambda construct
+│
+├── services/                          # Lambda function code
+│   ├── shared/                        # Shared utilities
+│   │   ├── package.json
+│   │   ├── tsconfig.json
+│   │   └── src/
+│   │       ├── types/
+│   │       │   ├── order.ts           # Order types/interfaces
+│   │       │   ├── inventory.ts       # Inventory types
+│   │       │   └── events.ts          # Event types
+│   │       ├── dynamodb/
+│   │       │   ├── client.ts          # DynamoDB client
+│   │       │   └── operations.ts      # Common DB operations
+│   │       ├── sqs/
+│   │       │   └── client.ts          # SQS client utilities
+│   │       └── utils/
+│   │           ├── idempotency.ts     # Idempotency key handling
+│   │           └── validation.ts      # Input validation
+│   │
+│   ├── order-api/                     # Order intake API handlers
+│   │   ├── package.json
+│   │   ├── tsconfig.json
+│   │   └── src/
+│   │       ├── handlers/
+│   │       │   ├── create-order.ts    # POST /orders
+│   │       │   ├── get-order.ts       # GET /orders/{id}
+│   │       │   ├── list-orders.ts     # GET /orders (by customer)
+│   │       │   └── cancel-order.ts    # DELETE /orders/{id}
+│   │       └── index.ts               # Handler exports
+│   │
+│   ├── order-processor/               # Async order processing
+│   │   ├── package.json
+│   │   ├── tsconfig.json
+│   │   └── src/
+│   │       ├── handlers/
+│   │       │   ├── process-order.ts   # Main SQS consumer
+│   │       │   ├── reserve-inventory.ts
+│   │       │   ├── process-payment.ts
+│   │       │   └── send-notifications.ts
+│   │       └── index.ts
+│   │
+│   ├── stream-processor/              # DynamoDB Streams handler
+│   │   ├── package.json
+│   │   ├── tsconfig.json
+│   │   └── src/
+│   │       └── handlers/
+│   │           └── stream-handler.ts  # Publish to EventBridge
+│   │
+│   └── analytics-export/              # Export to S3 for analytics
+│       ├── package.json
+│       ├── tsconfig.json
+│       └── src/
+│           └── handlers/
+│               └── firehose-transform.ts
+│
+├── migration/                         # SQL migration tools
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/
+│       ├── dual-write/
+│       │   └── sql-writer.ts          # Dual-write to SQL
+│       └── backfill/
+│           └── historical-import.ts   # Batch import from SQL
+│
+└── tests/                             # Test suites
+    ├── unit/
+    ├── integration/
+    └── e2e/
+```
+
+---
+
+## Implementation Phases
+
+### Phase 1: Project Setup & Core Infrastructure
+
+**Goal:** Set up project structure and deploy core DynamoDB tables
+
+**Tasks:**
+
+1. **Initialize project structure**
+   - Create root package.json with npm workspaces
+   - Create root tsconfig.json with project references
+   - Create .gitignore for Node.js/CDK project
+   - Initialize CDK app with `cdk init`
+
+2. **Create DynamoDB infrastructure (database-stack.ts)**
+   - Orders table (PK: customer_id, SK: order_ts#order_id)
+   - OrderById table (PK: order_id)
+   - Inventory table (PK: store_id#sku)
+   - GSI1: county_id + order_ts
+   - GSI2: store_id + order_ts
+   - GSI3: status + order_ts
+   - Enable DynamoDB Streams on Orders table
+   - Configure On-Demand capacity
+   - Enable encryption with KMS
+
+3. **Create shared types and utilities (services/shared/)**
+   - Order, OrderItem, Customer interfaces
+   - DynamoDB document client wrapper
+   - Idempotency key utilities
+   - Input validation schemas (using zod)
+
+**Files to create:**
+- `/package.json`
+- `/tsconfig.json`
+- `/.gitignore`
+- `/cdk.json`
+- `/infrastructure/package.json`
+- `/infrastructure/tsconfig.json`
+- `/infrastructure/bin/app.ts`
+- `/infrastructure/lib/stacks/database-stack.ts`
+- `/infrastructure/lib/constructs/order-table.ts`
+- `/services/shared/package.json`
+- `/services/shared/tsconfig.json`
+- `/services/shared/src/types/order.ts`
+- `/services/shared/src/types/inventory.ts`
+- `/services/shared/src/dynamodb/client.ts`
+- `/services/shared/src/dynamodb/operations.ts`
+- `/services/shared/src/utils/idempotency.ts`
+- `/services/shared/src/utils/validation.ts`
+
+---
+
+### Phase 2: Order API (Fast Accept)
+
+**Goal:** Build API Gateway + Lambda endpoints for order intake
+
+**Tasks:**
+
+1. **Create API infrastructure (api-stack.ts)**
+   - API Gateway REST API
+   - WAF WebACL with rate limiting
+   - Lambda functions for each endpoint
+   - IAM roles with least privilege
+   - Request/response models
+
+2. **Implement order handlers (services/order-api/)**
+   - POST /orders - Create order (write PENDING, enqueue to SQS)
+   - GET /orders/{id} - Get order by ID (OrderById table)
+   - GET /orders?customer_id=X - List customer orders
+   - DELETE /orders/{id} - Cancel order (conditional update)
+
+3. **Implement conditional writes and idempotency**
+   - Check idempotency key before creating
+   - Use ConditionExpression for safe updates
+   - Return existing order if duplicate request
+
+**Files to create:**
+- `/infrastructure/lib/stacks/api-stack.ts`
+- `/infrastructure/lib/constructs/order-api.ts`
+- `/services/order-api/package.json`
+- `/services/order-api/tsconfig.json`
+- `/services/order-api/src/handlers/create-order.ts`
+- `/services/order-api/src/handlers/get-order.ts`
+- `/services/order-api/src/handlers/list-orders.ts`
+- `/services/order-api/src/handlers/cancel-order.ts`
+- `/services/order-api/src/index.ts`
+
+---
+
+### Phase 3: Async Processing (SQS Workers)
+
+**Goal:** Build background workers for order processing
+
+**Tasks:**
+
+1. **Create SQS infrastructure (processing-stack.ts)**
+   - Order processing queue (main queue)
+   - Dead-letter queue for failed messages
+   - Lambda consumers with concurrency limits
+   - Retry policies (3 retries, exponential backoff)
+
+2. **Implement order processor (services/order-processor/)**
+   - Main SQS consumer - orchestrate processing steps
+   - Inventory reservation (transactional write)
+   - Payment processing (mock/stub initially)
+   - Status updates (PENDING -> CONFIRMED/FAILED)
+   - Idempotent processing (check if already processed)
+
+3. **Implement notification handler**
+   - Publish order events to SNS
+   - Email/SMS notifications (stub)
+
+**Files to create:**
+- `/infrastructure/lib/stacks/processing-stack.ts`
+- `/infrastructure/lib/constructs/order-processor.ts`
+- `/services/order-processor/package.json`
+- `/services/order-processor/tsconfig.json`
+- `/services/order-processor/src/handlers/process-order.ts`
+- `/services/order-processor/src/handlers/reserve-inventory.ts`
+- `/services/order-processor/src/handlers/process-payment.ts`
+- `/services/order-processor/src/handlers/send-notifications.ts`
+- `/services/order-processor/src/index.ts`
+
+---
+
+### Phase 4: Event Stream (Reactive Integration)
+
+**Goal:** Set up DynamoDB Streams -> EventBridge for event-driven architecture
+
+**Tasks:**
+
+1. **Create events infrastructure (events-stack.ts)**
+   - DynamoDB Streams trigger Lambda
+   - EventBridge event bus
+   - Event rules for routing
+   - SNS topics for notifications
+
+2. **Implement stream processor (services/stream-processor/)**
+   - Parse DynamoDB stream records
+   - Transform to domain events
+   - Publish to EventBridge
+   - Handle INSERT/MODIFY/REMOVE events
+
+**Files to create:**
+- `/infrastructure/lib/stacks/events-stack.ts`
+- `/services/stream-processor/package.json`
+- `/services/stream-processor/tsconfig.json`
+- `/services/stream-processor/src/handlers/stream-handler.ts`
+- `/services/shared/src/types/events.ts`
+
+---
+
+### Phase 5: Analytics Pipeline
+
+**Goal:** Export order data to S3 for analytics/reporting
+
+**Tasks:**
+
+1. **Create analytics infrastructure (analytics-stack.ts)**
+   - Kinesis Firehose delivery stream
+   - S3 bucket for analytics data (partitioned by date)
+   - Athena database and tables
+   - Glue crawler for schema discovery
+   - IAM roles for cross-service access
+
+2. **Implement Firehose transformer (services/analytics-export/)**
+   - Transform DynamoDB format to analytics-friendly JSON
+   - Add partitioning keys (year/month/day)
+   - Handle data enrichment
+
+3. **Create Athena queries**
+   - Orders by county (last 24h)
+   - Customer order history
+   - Store pick list
+   - Sales by time period
+
+**Files to create:**
+- `/infrastructure/lib/stacks/analytics-stack.ts`
+- `/services/analytics-export/package.json`
+- `/services/analytics-export/tsconfig.json`
+- `/services/analytics-export/src/handlers/firehose-transform.ts`
+
+---
+
+### Phase 6: Migration Infrastructure
+
+**Goal:** Set up dual-write and historical data migration
+
+**Tasks:**
+
+1. **Create migration infrastructure (migration-stack.ts)**
+   - DMS replication instance
+   - Source endpoint (SQL)
+   - Target endpoint (DynamoDB)
+   - Replication task for backfill
+
+2. **Implement dual-write capability (migration/dual-write/)**
+   - SQL writer Lambda (triggered by DynamoDB Streams)
+   - Feature flag for enabling/disabling
+   - Error handling and retry logic
+
+3. **Implement backfill tools (migration/backfill/)**
+   - Batch reader from SQL
+   - DynamoDB batch writer
+   - Progress tracking and resumability
+
+**Files to create:**
+- `/infrastructure/lib/stacks/migration-stack.ts`
+- `/migration/package.json`
+- `/migration/tsconfig.json`
+- `/migration/src/dual-write/sql-writer.ts`
+- `/migration/src/backfill/historical-import.ts`
+
+---
+
+### Phase 7: Testing & Documentation
+
+**Goal:** Add comprehensive tests and documentation
+
+**Tasks:**
+
+1. **Unit tests**
+   - Test all Lambda handlers
+   - Test DynamoDB operations
+   - Test validation logic
+   - Mock AWS services
+
+2. **Integration tests**
+   - Test API endpoints
+   - Test SQS processing flow
+   - Test DynamoDB transactions
+
+3. **E2E tests**
+   - Full order flow test
+   - Error handling scenarios
+
+**Files to create:**
+- `/tests/unit/order-api.test.ts`
+- `/tests/unit/order-processor.test.ts`
+- `/tests/integration/api.test.ts`
+- `/tests/e2e/order-flow.test.ts`
+
+---
+
+## DynamoDB Key Design Summary
+
+| Table | PK | SK | Purpose |
+|-------|----|----|---------|
+| Orders | customer_id | order_ts#order_id | Customer order history |
+| OrderById | order_id | - | Direct order lookup |
+| Inventory | store_id#sku | - | Stock tracking |
+
+| GSI | PK | SK | Purpose |
+|-----|----|----|---------|
+| GSI1 | county_id | order_ts | County ops dashboard |
+| GSI2 | store_id | order_ts | Store fulfillment |
+| GSI3 | status | order_ts | Pick/pack queues |
+
+---
+
+## Security Considerations
+
+- All Lambda functions use least-privilege IAM roles
+- DynamoDB tables encrypted with KMS
+- API Gateway with WAF and rate limiting
+- TLS everywhere
+- Secrets in AWS Secrets Manager
+- CloudTrail enabled for audit logging

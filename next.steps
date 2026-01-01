@@ -1,0 +1,6 @@
+Next Steps:
+  1. npm install - Install dependencies
+  2. npm run build - Compile TypeScript
+  3. npm test - Run tests
+  4. cdk synth - Generate CloudFormation
+  5. cdk deploy --all - Deploy to AWS

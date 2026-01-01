@@ -1,0 +1,17 @@
+Migration Workflow:
+  # 1. Configure SQL connection secret
+  aws secretsmanager update-secret --secret-id acme-liquors/sql-connection ...
+
+  # 2. Run backfill (invoke multiple times until complete)
+  aws lambda invoke --function-name acme-historical-backfill \
+    --payload '{"action":"START"}' response.json
+
+  # 3. Enable dual-write
+  aws ssm put-parameter --name /acme-liquors/migration/dual-write-enabled \
+    --value "true" --overwrite
+
+  # 4. Cut over reads to DynamoDB (feature flag in app)
+
+  # 5. Disable dual-write when SQL deprecated
+  aws ssm put-parameter --name /acme-liquors/migration/dual-write-enabled \
+    --value "false" --overwrite
