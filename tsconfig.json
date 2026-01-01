@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true
+  },
+  "references": [
+    { "path": "./infrastructure" },
+    { "path": "./services/shared" },
+    { "path": "./services/order-api" },
+    { "path": "./services/order-processor" },
+    { "path": "./services/stream-processor" },
+    { "path": "./services/analytics-export" },
+    { "path": "./migration" }
+  ]
+}
